@@ -301,7 +301,7 @@ int main(int argc, char const *argv[])
     noecho();
 
     /* Mapeo de archivo */
-    char *ptr = mapFile((char *)argv[1]);
+    char *ptr = mapFile(argv[1]);
     if (ptr == NULL)
     {
         exit(EXIT_FAILURE);

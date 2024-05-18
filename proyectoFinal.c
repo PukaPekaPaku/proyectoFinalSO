@@ -10,11 +10,11 @@
 #include <math.h>
 
 #include "ext4.h"
+#include "hexVisor.c"
 
 /* Variables globales */
 int fd;  /* Archivo a leer */
 long fs; /* Tamaño de archivo */
-char *ptr;
 
 /* Funciones */
 char *mapFile(char *filePath);
@@ -23,8 +23,11 @@ void particiones(char *ptr);
 void superbloque(char *ptr);
 void showGDT(char *ptr);
 void gdt(char *ptr);
-// void lectura_inode(char *ptr, struct ext4_inode inode, unsigned short offset);
-void lee_inode(struct ext4_inode *ptrInode, char *ptr);
+int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre);
+
+/* Funciones del lector en hexadecimal */
+char *hazLinea(char *base, int dir, long lnHex);
+void show(char *map, long lnHex);
 
 char *mapFile(char *filePath)
 {
@@ -282,7 +285,7 @@ void gdt(char *ptr)
             break;
 
         case 10:
-            lee_inode(&inode, ptr);
+            lee_inode(&inode, ptr, "/");
             break;
 
         default:
@@ -295,20 +298,13 @@ void gdt(char *ptr)
     }
 }
 
-void lee_inode(struct ext4_inode *ptrInode, char *ptr)
+int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre)
 {
     if (((ptrInode->i_mode) & 0x4000) == 0x4000)
     {
         /* Estamos leyendo un directorio */
         struct ext4_extent_header eh;
         memcpy(&eh, &(ptrInode->i_block[0]), sizeof(struct ext4_extent_header));
-
-        /* struct ext4_extent ex[eh.eh_max];
-
-        int i = 0;
-        for(i = 0; i < eh.eh_entries; i++) {
-            memcpy(&(ex[i]), &(ptrInode->i_block[(i + 1) * 3]), sizeof(struct ext4_extent));
-        } */
 
         struct ext4_extent ex;
         memcpy(&ex, &(ptrInode->i_block[3]), sizeof(struct ext4_extent));
@@ -329,6 +325,12 @@ void lee_inode(struct ext4_inode *ptrInode, char *ptr)
 
         ptrDirs = (ptr + (ex.ee_start_lo * 0x400));
         struct ext4_dir_entry_2 dirEntries[numEntries];
+        char *status[numEntries];
+
+        for (int temp = 0; temp < numEntries; temp++)
+        {
+            status[temp] = "";
+        }
 
         int i = 0;
         while (i < numEntries)
@@ -339,7 +341,9 @@ void lee_inode(struct ext4_inode *ptrInode, char *ptr)
         }
 
         /* ----------------------------------------------------------------------------------------------- */
-        int row = 0;
+        int row;
+    printScreen:
+        row = 0;
         clear();
         move(++row, 1);
         addstr("Directorio");
@@ -348,7 +352,7 @@ void lee_inode(struct ext4_inode *ptrInode, char *ptr)
         int j = 0;
         while (j < numEntries)
         {
-            mvprintw(++row, 1, "%s -> %u", dirEntries[j].name, dirEntries[j].inode);
+            mvprintw(++row, 1, "%s -> %u %s", dirEntries[j].name, dirEntries[j].inode, status[j]);
             j++;
         }
 
@@ -365,7 +369,7 @@ void lee_inode(struct ext4_inode *ptrInode, char *ptr)
             switch (c)
             {
             case KEY_BACKSPACE: /* Exit on BACKSPACE */
-                return;
+                return 0;
                 break;
 
             case KEY_UP:
@@ -389,13 +393,32 @@ void lee_inode(struct ext4_inode *ptrInode, char *ptr)
 
                 struct ext4_group_desc gd;
                 memcpy(&gd, (ptr + 0x800 + (gdOfSelected * sizeof(struct ext4_group_desc))), sizeof(struct ext4_group_desc));
-                
+
                 struct ext4_inode inodeN;
                 memcpy(&inodeN, (ptr + (0x400 * gd.bg_inode_table_lo) + (offsetOfSelected * 0x100)), sizeof(struct ext4_inode));
 
-                lee_inode(&inodeN, ptr);
-                
-                return;
+                /**
+                 * Return   Status
+                 * -1       Lectura a archivo vacio
+                 * 0        Lectura a directorio
+                 * 1        Lectura a archivo con salida estandar
+                 */
+
+                int out = lee_inode(&inodeN, ptr, dirEntries[row - 3].name);
+                switch (out)
+                {
+                case -1:
+                    status[row - 3] = " - Archivo vacio";
+                    goto printScreen;
+                    break;
+                case 1:
+                    goto printScreen;
+                    break;
+
+                default:
+                    return 0;
+                    break;
+                }
                 break;
 
             default:
@@ -408,12 +431,201 @@ void lee_inode(struct ext4_inode *ptrInode, char *ptr)
     else if (((ptrInode->i_mode) & 0x8000) == 0x8000)
     {
         /* Estamos leyendo un archivo */
+        struct ext4_extent_header eh;
+        memcpy(&eh, &(ptrInode->i_block[0]), sizeof(struct ext4_extent_header));
 
-        // TODO abrir en hex y permitir guardar
+        if (eh.eh_entries == 0)
+        {
+            return -1;
+        }
+
+        struct ext4_extent ex[eh.eh_entries];
+
+        int i = 0;
+        for (i = 0; i < eh.eh_entries; i++)
+        {
+            memcpy(&(ex[i]), &(ptrInode->i_block[(i + 1) * 3]), sizeof(struct ext4_extent));
+        }
+
+        // Visualizamos la primera parte del archivo
+        char *ptrFile = (ptr + (ex[0].ee_start_lo * 0x400));
+        long tam = (long)(ex[0].ee_len * 0x400);
+
+        // lee(ptrFile, tam);
+
+        /* Funcion lee */
+        int row, col;
+        long lnHex = 0L;
+        short offset = 0;
+        clear();
+
+        char *inicio = ptrFile;
+        char buffer[256];
+        long jump, lastLine = (tam / 16) - 1;
+
+        show(ptrFile, lnHex);
+
+        mvprintw(26, 9, "Offset:%x", offset);
+
+        row = 0;
+        col = 9;
+        move(row, col);
+        refresh();
+
+        int c = getch();
+
+        while (c != KEY_BACKSPACE)
+        {
+            switch (c)
+            {
+            case KEY_LEFT:
+                if (col > 9)
+                {
+                    col -= 3;
+                    offset--;
+                    mvprintw(26, 9, "Offset:%x", offset);
+
+                    move(27, 0);
+                    clrtoeol();
+                }
+                break;
+            case KEY_RIGHT:
+                if (col < 54)
+                {
+                    col += 3;
+                    offset++;
+                    mvprintw(26, 9, "Offset:%x", offset);
+
+                    move(27, 0);
+                    clrtoeol();
+                }
+                break;
+            case KEY_UP:
+                if (row > 0)
+                {
+                    row--;
+                }
+                else if (lnHex > 0)
+                {
+                    ptrFile -= 16;
+                    move(0, 0);
+                    show(ptrFile, --lnHex);
+                }
+                move(27, 0);
+                clrtoeol();
+                break;
+            case KEY_DOWN:
+                if (row < 24)
+                {
+                    row++;
+                }
+                else if (lnHex < (lastLine - 24))
+                {
+                    ptrFile += 16;
+                    move(0, 0);
+                    show(ptrFile, ++lnHex);
+                }
+                else
+                {
+                    move(27, 9);
+                    addstr("Fin de lectura. Guarde el archivo para visualizarlo en su totalidad.");
+                }
+                move(27, 0);
+                clrtoeol();
+                break;
+            case 'g':
+
+                move(27, 9);
+                addstr("Saltar a direccion: 0x");
+
+                move(27, 31);
+                clrtoeol();
+                echo();
+                getstr(buffer);
+                noecho();
+                jump = strtol(buffer, NULL, 16);
+                offset = jump % 0x10;
+                jump -= offset;
+
+                if ((jump / 0x10) <= lastLine)
+                {
+                    if ((jump / 0x10) >= lastLine - 24)
+                    {
+                        ptrFile = inicio + (lastLine - 24) * 16;
+                        lnHex = lastLine - 24;
+                    }
+                    else
+                    {
+                        ptrFile = inicio + jump;
+                        lnHex = (jump / 0x10);
+                    }
+                    move(0, 0);
+                    show(ptrFile, lnHex);
+
+                    mvprintw(26, 9, "Offset: %x", offset);
+
+                    row = 0;
+                    col = 9 + (offset * 3);
+                }
+                else
+                {
+                    move(27, 9);
+                    clrtoeol();
+                    addstr("Salto fuera del archivo");
+                }
+
+                memset(buffer, 0, sizeof(buffer));
+                break;
+            case 'a':
+                ptrFile = inicio;
+                lnHex = 0;
+                clear();
+                show(ptrFile, lnHex);
+                row = 0;
+                col = 9;
+                break;
+            case 'z':
+                ptrFile = inicio + (lastLine - 24) * 16;
+                lnHex = lastLine - 24;
+                clear();
+                show(ptrFile, lnHex);
+                row = 24;
+                col = 9;
+                break;
+            case 's':
+                sprintf(buffer, "%s", nombre);
+                FILE *file = fopen(buffer, "w");
+                memset(buffer, 0, sizeof(buffer));
+
+                if (file == NULL)
+                {
+                    perror("Error al crear el archivo");
+                    return -2;
+                }
+
+                for (int temp = 0; temp < eh.eh_entries; temp++)
+                {
+                    fwrite((ptr + (ex[temp].ee_start_lo * 0x400)), 1, (ex[temp].ee_len * 0x400), file);
+                }
+
+                fclose(file);
+
+                move(27, 9);
+                addstr("Archivo guardado");
+
+                break;
+            default:
+                break;
+            }
+            move(row, col);
+            c = getch();
+        }
+
+        return 1;
     }
     else
     {
-        return;
+        return -2;
     }
 }
 
@@ -431,7 +643,7 @@ int main(int argc, char const *argv[])
     noecho();
 
     /* Mapeo de archivo */
-    ptr = mapFile(argv[1]);
+    char *ptr = mapFile(argv[1]);
     if (ptr == NULL)
     {
         exit(EXIT_FAILURE);
@@ -472,14 +684,11 @@ int main(int argc, char const *argv[])
                 particiones(ptr + 0x01BE);
                 break;
             case 2:
-                // Hard-coded :/
                 superbloque(ptr + 0x100000);
                 break;
-
             case 3:
                 gdt(ptr + 0x100000);
                 break;
-
             default:
                 break;
             }

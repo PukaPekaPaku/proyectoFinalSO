@@ -453,7 +453,7 @@ int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre)
 
         // lee(ptrFile, tam);
 
-        /* Funcion lee */
+        /* Funcion "lee" modificada */
         int row, col;
         long lnHex = 0L;
         short offset = 0;

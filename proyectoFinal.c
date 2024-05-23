@@ -25,9 +25,10 @@ void showGDT(char *ptr);
 void gdt(char *ptr);
 int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre);
 
-/* Funciones del lector en hexadecimal */
+/* Funciones de hexVisor.c */
 char *hazLinea(char *base, int dir, long lnHex);
 void show(char *map, long lnHex);
+int lee(char *map, long tam, char *ptr, char *nombre, struct ext4_extent *ex);
 
 char *mapFile(char *filePath)
 {
@@ -67,6 +68,7 @@ void showMenu()
     addstr("Controles:\n  ^ v   : navegar.\n  ENTER : elegir seleccion.\n  'q'   : salir");
 }
 
+/* Inicio del inciso 1 */
 void particiones(char *ptr)
 {
     unsigned char hi, si, hf, sf, type;
@@ -243,7 +245,9 @@ void superbloque(char *ptr)
         /* Exit on BACKSPACE */
     }
 }
+/* Fin del inciso 1 */
 
+/* Inicio del inciso 2 */
 void showGDT(char *ptr)
 {
     int row = 1;
@@ -298,50 +302,92 @@ void gdt(char *ptr)
     }
 }
 
+struct ext4_dir_entry_2 *getDirEntries(struct ext4_inode *ptrInode, char *ptr)
+{
+    struct ext4_extent_header eh;
+    memcpy(&eh, &(ptrInode->i_block[0]), sizeof(struct ext4_extent_header));
+
+    struct ext4_extent ex;
+    memcpy(&ex, &(ptrInode->i_block[3]), sizeof(struct ext4_extent));
+
+    unsigned short numEntries = 0;
+    struct ext4_dir_entry_2 auxDirEntry;
+
+    char *ptrDirs = (ptr + (ex.ee_start_lo * 0x400));
+
+    memcpy(&auxDirEntry, ptrDirs, sizeof(struct ext4_dir_entry_2));
+
+    while (auxDirEntry.inode != 0)
+    {
+        numEntries++;
+        ptrDirs += auxDirEntry.rec_len;
+        memcpy(&auxDirEntry, ptrDirs, sizeof(struct ext4_dir_entry_2));
+    }
+    numEntries++;
+
+    ptrDirs = (ptr + (ex.ee_start_lo * 0x400));
+    struct ext4_dir_entry_2 *dirEntries = malloc(sizeof(struct ext4_dir_entry_2) * numEntries);
+    char *status[numEntries];
+
+    int i = 0;
+    while (i < numEntries - 1)
+    {
+        memcpy(&dirEntries[i], ptrDirs, sizeof(struct ext4_dir_entry_2));
+        ptrDirs += dirEntries[i].rec_len;
+        i++;
+    }
+
+    return dirEntries;
+}
+
+struct ext4_extent *getFileLocation(struct ext4_inode *ptrInode, char *ptr)
+{
+    struct ext4_extent_header eh;
+    memcpy(&eh, &(ptrInode->i_block[0]), sizeof(struct ext4_extent_header));
+
+    if (eh.eh_entries == 0)
+    {
+        return NULL;
+    }
+
+    struct ext4_extent *ex = malloc(sizeof(struct ext4_extent) * eh.eh_entries);
+
+    int i = 0;
+    for (i = 0; i < eh.eh_entries; i++)
+    {
+        memcpy(&(ex[i]), &(ptrInode->i_block[(i + 1) * 3]), sizeof(struct ext4_extent));
+    }
+
+    return ex;
+}
+
+struct ext4_inode *getInodeOfSelected(char *ptr, unsigned int inode)
+{
+    unsigned int gdOfSelected = (inode - 1) / 0x7F8;
+    unsigned int offsetOfSelected = (inode - 1) % 0x7F8;
+
+    struct ext4_group_desc gd;
+    memcpy(&gd, (ptr + 0x800 + (gdOfSelected * sizeof(struct ext4_group_desc))), sizeof(struct ext4_group_desc));
+
+    struct ext4_inode *inodeN = malloc(sizeof(struct ext4_inode));
+    memcpy(inodeN, (ptr + (0x400 * gd.bg_inode_table_lo) + (offsetOfSelected * 0x100)), sizeof(struct ext4_inode));
+
+    return inodeN;
+}
+/* Fin del inciso 2 */
+
+/* Inicio del inciso 3 */
 int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre)
 {
     if (((ptrInode->i_mode) & 0x4000) == 0x4000)
     {
         /* Estamos leyendo un directorio */
-        struct ext4_extent_header eh;
-        memcpy(&eh, &(ptrInode->i_block[0]), sizeof(struct ext4_extent_header));
-
-        struct ext4_extent ex;
-        memcpy(&ex, &(ptrInode->i_block[3]), sizeof(struct ext4_extent));
+        struct ext4_dir_entry_2 *dirEntries = getDirEntries(ptrInode, ptr);
 
         unsigned short numEntries = 0;
-        struct ext4_dir_entry_2 auxDirEntry;
 
-        char *ptrDirs = (ptr + (ex.ee_start_lo * 0x400));
-
-        memcpy(&auxDirEntry, ptrDirs, sizeof(struct ext4_dir_entry_2));
-
-        while (auxDirEntry.inode != 0)
-        {
-            numEntries++;
-            ptrDirs += auxDirEntry.rec_len;
-            memcpy(&auxDirEntry, ptrDirs, sizeof(struct ext4_dir_entry_2));
-        }
-
-        ptrDirs = (ptr + (ex.ee_start_lo * 0x400));
-        struct ext4_dir_entry_2 dirEntries[numEntries];
-        char *status[numEntries];
-
-        for (int temp = 0; temp < numEntries; temp++)
-        {
-            status[temp] = "";
-        }
-
-        int i = 0;
-        while (i < numEntries)
-        {
-            memcpy(&dirEntries[i], ptrDirs, sizeof(struct ext4_dir_entry_2));
-            ptrDirs += dirEntries[i].rec_len;
-            i++;
-        }
-
-        /* ----------------------------------------------------------------------------------------------- */
         int row;
+        /* ----------------------------------------------------------------------------------------------- */
     printScreen:
         row = 0;
         clear();
@@ -350,9 +396,10 @@ int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre)
         row++;
 
         int j = 0;
-        while (j < numEntries)
+        while (dirEntries[j].inode != 0)
         {
-            mvprintw(++row, 1, "%s -> %u %s", dirEntries[j].name, dirEntries[j].inode, status[j]);
+            mvprintw(++row, 1, "%s -> %u", dirEntries[j].name, dirEntries[j].inode);
+            numEntries++;
             j++;
         }
 
@@ -388,34 +435,25 @@ int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre)
 
             case 10:
                 /* Elemento seleccionado */
-                unsigned int gdOfSelected = (dirEntries[row - 3].inode - 1) / 0x7F8;
-                unsigned int offsetOfSelected = (dirEntries[row - 3].inode - 1) % 0x7F8;
+                struct ext4_inode *inodeN = getInodeOfSelected(ptr, dirEntries[row - 3].inode);
 
-                struct ext4_group_desc gd;
-                memcpy(&gd, (ptr + 0x800 + (gdOfSelected * sizeof(struct ext4_group_desc))), sizeof(struct ext4_group_desc));
-
-                struct ext4_inode inodeN;
-                memcpy(&inodeN, (ptr + (0x400 * gd.bg_inode_table_lo) + (offsetOfSelected * 0x100)), sizeof(struct ext4_inode));
-
-                /**
-                 * Return   Status
-                 * -1       Lectura a archivo vacio
-                 * 0        Lectura a directorio
-                 * 1        Lectura a archivo con salida estandar
-                 */
-
-                int out = lee_inode(&inodeN, ptr, dirEntries[row - 3].name);
+                int out = lee_inode(inodeN, ptr, dirEntries[row - 3].name);
                 switch (out)
                 {
                 case -1:
-                    status[row - 3] = " - Archivo vacio";
-                    goto printScreen;
+                    // Lectura a archivo vacio
+                    move(row, 1);
+                    clrtoeol();
+                    mvprintw(row, 1, "%s -> %u %s", dirEntries[row - 3].name, dirEntries[row - 3].inode, "Archivo vacio");
+
                     break;
                 case 1:
+                    // Lectura a archivo con salida estandar
                     goto printScreen;
                     break;
 
                 default:
+                    // Lectura a otro directorio
                     return 0;
                     break;
                 }
@@ -431,195 +469,18 @@ int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre)
     else if (((ptrInode->i_mode) & 0x8000) == 0x8000)
     {
         /* Estamos leyendo un archivo */
-        struct ext4_extent_header eh;
-        memcpy(&eh, &(ptrInode->i_block[0]), sizeof(struct ext4_extent_header));
+        struct ext4_extent *ex = getFileLocation(ptrInode, ptr);
 
-        if (eh.eh_entries == 0)
+        if (ex == NULL)
         {
             return -1;
-        }
-
-        struct ext4_extent ex[eh.eh_entries];
-
-        int i = 0;
-        for (i = 0; i < eh.eh_entries; i++)
-        {
-            memcpy(&(ex[i]), &(ptrInode->i_block[(i + 1) * 3]), sizeof(struct ext4_extent));
         }
 
         // Visualizamos la primera parte del archivo
         char *ptrFile = (ptr + (ex[0].ee_start_lo * 0x400));
         long tam = (long)(ex[0].ee_len * 0x400);
 
-        // lee(ptrFile, tam);
-
-        /* Funcion "lee" modificada */
-        int row, col;
-        long lnHex = 0L;
-        short offset = 0;
-        clear();
-
-        char *inicio = ptrFile;
-        char buffer[256];
-        long jump, lastLine = (tam / 16) - 1;
-
-        show(ptrFile, lnHex);
-
-        mvprintw(26, 9, "Offset:%x", offset);
-
-        row = 0;
-        col = 9;
-        move(row, col);
-        refresh();
-
-        int c = getch();
-
-        while (c != KEY_BACKSPACE)
-        {
-            switch (c)
-            {
-            case KEY_LEFT:
-                if (col > 9)
-                {
-                    col -= 3;
-                    offset--;
-                    mvprintw(26, 9, "Offset:%x", offset);
-
-                    move(27, 0);
-                    clrtoeol();
-                }
-                break;
-            case KEY_RIGHT:
-                if (col < 54)
-                {
-                    col += 3;
-                    offset++;
-                    mvprintw(26, 9, "Offset:%x", offset);
-
-                    move(27, 0);
-                    clrtoeol();
-                }
-                break;
-            case KEY_UP:
-                if (row > 0)
-                {
-                    row--;
-                }
-                else if (lnHex > 0)
-                {
-                    ptrFile -= 16;
-                    move(0, 0);
-                    show(ptrFile, --lnHex);
-                }
-                move(27, 0);
-                clrtoeol();
-                break;
-            case KEY_DOWN:
-                if (row < 24)
-                {
-                    row++;
-                }
-                else if (lnHex < (lastLine - 24))
-                {
-                    ptrFile += 16;
-                    move(0, 0);
-                    show(ptrFile, ++lnHex);
-                }
-                else
-                {
-                    move(27, 9);
-                    addstr("Fin de lectura. Guarde el archivo para visualizarlo en su totalidad.");
-                }
-                move(27, 0);
-                clrtoeol();
-                break;
-            case 'g':
-
-                move(27, 9);
-                addstr("Saltar a direccion: 0x");
-
-                move(27, 31);
-                clrtoeol();
-                echo();
-                getstr(buffer);
-                noecho();
-                jump = strtol(buffer, NULL, 16);
-                offset = jump % 0x10;
-                jump -= offset;
-
-                if ((jump / 0x10) <= lastLine)
-                {
-                    if ((jump / 0x10) >= lastLine - 24)
-                    {
-                        ptrFile = inicio + (lastLine - 24) * 16;
-                        lnHex = lastLine - 24;
-                    }
-                    else
-                    {
-                        ptrFile = inicio + jump;
-                        lnHex = (jump / 0x10);
-                    }
-                    move(0, 0);
-                    show(ptrFile, lnHex);
-
-                    mvprintw(26, 9, "Offset: %x", offset);
-
-                    row = 0;
-                    col = 9 + (offset * 3);
-                }
-                else
-                {
-                    move(27, 9);
-                    clrtoeol();
-                    addstr("Salto fuera del archivo");
-                }
-
-                memset(buffer, 0, sizeof(buffer));
-                break;
-            case 'a':
-                ptrFile = inicio;
-                lnHex = 0;
-                clear();
-                show(ptrFile, lnHex);
-                row = 0;
-                col = 9;
-                break;
-            case 'z':
-                ptrFile = inicio + (lastLine - 24) * 16;
-                lnHex = lastLine - 24;
-                clear();
-                show(ptrFile, lnHex);
-                row = 24;
-                col = 9;
-                break;
-            case 's':
-                sprintf(buffer, "%s", nombre);
-                FILE *file = fopen(buffer, "w");
-                memset(buffer, 0, sizeof(buffer));
-
-                if (file == NULL)
-                {
-                    perror("Error al crear el archivo");
-                    return -2;
-                }
-
-                for (int temp = 0; temp < eh.eh_entries; temp++)
-                {
-                    fwrite((ptr + (ex[temp].ee_start_lo * 0x400)), 1, (ex[temp].ee_len * 0x400), file);
-                }
-
-                fclose(file);
-
-                move(27, 9);
-                addstr("Archivo guardado");
-
-                break;
-            default:
-                break;
-            }
-            move(row, col);
-            c = getch();
-        }
+        lee(ptrFile, tam, ptr, nombre, ex);
 
         return 1;
     }
@@ -628,6 +489,7 @@ int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre)
         return -2;
     }
 }
+/* Fin del inciso 3 */
 
 int main(int argc, char const *argv[])
 {

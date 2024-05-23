@@ -53,7 +53,7 @@ void show(char *map, long lnHex)
     addstr("Controles:\n  ^ v < > : navegar.\t\t\t 'g' : Saltar a direccion.\n 'a' : Ir al inicio de la lectura.\t 'z' : Ir al final de la lectura\n 's' : guardar archivo\t\t\t BACKSPACE : atras");
 }
 
-int lee(char *map, long tam)
+int lee(char *map, long tam, char *ptr, char *nombre, struct ext4_extent *ex)
 {
     int row, col;
     long lnHex = 0L;
@@ -198,8 +198,31 @@ int lee(char *map, long tam)
             row = 24;
             col = 9;
             break;
+        /* Modificacion inciso 3 */
         case 's':
-            break;
+                sprintf(buffer, "%s", nombre);
+                FILE *file = fopen(buffer, "w");
+                memset(buffer, 0, sizeof(buffer));
+
+                if (file == NULL)
+                {
+                    perror("Error al crear el archivo");
+                    return -2;
+                }
+
+                int temp = 0;
+                while(ex[temp].ee_start_lo != 0) {
+                    fwrite((ptr + (ex[temp].ee_start_lo * 0x400)), 1, (ex[temp].ee_len * 0x400), file);
+                    temp++;
+                }
+
+                fclose(file);
+
+                move(27, 9);
+                addstr("Archivo guardado");
+
+                break;
+        /* Fin modificacion inciso 3 */
         default:
             break;
         }

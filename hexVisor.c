@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 
+#include "ext4.h"
+
 char *hazLinea(char *base, int dir, long lnHex)
 {
     char linea[100]; // La linea es mas pequeña
@@ -211,9 +213,12 @@ int lee(char *map, long tam, char *ptr, char *nombre, struct ext4_extent *ex)
                 }
 
                 int temp = 0;
-                while(ex[temp].ee_start_lo != 0) {
-                    fwrite((ptr + (ex[temp].ee_start_lo * 0x400)), 1, (ex[temp].ee_len * 0x400), file);
+                char *aux;
+                aux = (ptr + (ex[temp].ee_start_lo * 0x400));
+                while((ex[temp].ee_len != 0) && (temp <= 3)) {
+                    fwrite(aux, 1, strlen(aux), file);
                     temp++;
+                    aux = (ptr + (ex[temp].ee_start_lo * 0x400));
                 }
 
                 fclose(file);

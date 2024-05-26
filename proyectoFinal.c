@@ -9,7 +9,7 @@
 #include <sys/mman.h>
 #include <math.h>
 
-#include "ext4.h"
+// #include "ext4.h"
 #include "hexVisor.c"
 
 /* Variables globales */
@@ -327,8 +327,7 @@ struct ext4_dir_entry_2 *getDirEntries(struct ext4_inode *ptrInode, char *ptr)
 
     ptrDirs = (ptr + (ex.ee_start_lo * 0x400));
     struct ext4_dir_entry_2 *dirEntries = malloc(sizeof(struct ext4_dir_entry_2) * numEntries);
-    char *status[numEntries];
-
+    
     int i = 0;
     while (i < numEntries - 1)
     {
@@ -336,6 +335,8 @@ struct ext4_dir_entry_2 *getDirEntries(struct ext4_inode *ptrInode, char *ptr)
         ptrDirs += dirEntries[i].rec_len;
         i++;
     }
+
+    memset(&dirEntries[i], 0, sizeof(struct ext4_dir_entry_2));
 
     return dirEntries;
 }
@@ -388,7 +389,6 @@ int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre)
 
         int row;
         /* ----------------------------------------------------------------------------------------------- */
-    printScreen:
         row = 0;
         clear();
         move(++row, 1);
@@ -448,8 +448,25 @@ int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre)
 
                     break;
                 case 1:
-                    // Lectura a archivo con salida estandar
-                    goto printScreen;
+                    // Salida tras lectura a archivo
+                    // goto printScreen;
+                    clear();
+                    row = 0;
+                    move(++row, 1);
+                    addstr("Directorio");
+                    row++;
+
+                    j = 0;
+                    while (j < numEntries)
+                    {
+                        mvprintw(++row, 1, "%s -> %u", dirEntries[j].name, dirEntries[j].inode);
+                        j++;
+                    }
+
+                    /* END */
+                    move(getmaxy(stdscr) - 4, 1);
+                    addstr("Controles:\n  ^ v       : navegar.\n  ENTER     : elegir seleccion.\n  BACKSPACE : atras");
+                    row = 3;
                     break;
 
                 default:
@@ -481,7 +498,7 @@ int lee_inode(struct ext4_inode *ptrInode, char *ptr, char *nombre)
         long tam = (long)(ex[0].ee_len * 0x400);
 
         lee(ptrFile, tam, ptr, nombre, ex);
-
+        free(ex);
         return 1;
     }
     else
